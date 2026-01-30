@@ -1,49 +1,38 @@
 @echo off
-setlocal enabledelayedexpansion
-
-REM ============================
-REM People Counter - Start Counter
-REM ============================
+setlocal EnableExtensions
 
 set "ROOT=%~dp0.."
 for %%I in ("%ROOT%") do set "ROOT=%%~fI"
 
-set "LOGDIR=%ROOT%\logs"
-set "VENV=%ROOT%\venv"
-set "PY=%VENV%\Scripts\python.exe"
-
-if not exist "%LOGDIR%" mkdir "%LOGDIR%"
-
-for /f "tokens=1-3 delims=/- " %%a in ("%date%") do set "D=%%c%%b%%a"
-for /f "tokens=1-3 delims=:., " %%a in ("%time%") do set "T=%%a%%b%%c"
-set "TS=%D%_%T%"
-
-set "LOG=%LOGDIR%\counter_%TS%.log"
+if not exist "%ROOT%\logs" mkdir "%ROOT%\logs"
+for /f "tokens=1-3 delims=/: " %%a in ("%date%") do set "D=%%c%%a%%b"
+for /f "tokens=1-3 delims=:. " %%a in ("%time%") do set "T=%%a%%b%%c"
+set "LOG=%ROOT%\logs\counter_%D%_%T%.log"
 
 echo [counter] ROOT=%ROOT%
 echo [counter] LOG=%LOG%
 echo [counter] Starting...
 
-if not exist "%PY%" (
-  echo [counter] ERROR: No encuentro venv en "%VENV%".
+if not exist "%ROOT%\venv\Scripts\python.exe" (
+  echo [counter] ERROR: No existe venv en %ROOT%\venv
   pause
   exit /b 1
 )
 
-REM OJO: ajusta este nombre si tu script final se llama distinto
-set "COUNTER_PY=%ROOT%\people_counter.py"
+REM === TU ARCHIVO REAL (CAMBIAR SI ES NECESARIO) ===
+REM Opciones comunes: people_counter.py / counter_webcam.py
+set "COUNTER_FILE=people_counter.py"
 
-if not exist "%COUNTER_PY%" (
-  echo [counter] ERROR: No encuentro "%COUNTER_PY%".
-  echo [counter] Revisa el nombre del archivo (por ejemplo counter_webcam.py).
+if not exist "%ROOT%\%COUNTER_FILE%" (
+  echo [counter] ERROR: No existe %ROOT%\%COUNTER_FILE%
+  echo [counter] Revisa el nombre del archivo del counter y actualiza COUNTER_FILE.
   pause
   exit /b 1
 )
 
+REM Importante: arrancar desde ROOT para que encuentre config.yaml y snapshots/
 pushd "%ROOT%"
 
-REM Ejecuta counter (usa config.yaml desde ROOT)
-"%PY%" "%COUNTER_PY%" >> "%LOG%" 2>&1
+"%ROOT%\venv\Scripts\python.exe" "%ROOT%\%COUNTER_FILE%" >> "%LOG%" 2>&1
 
 popd
-endlocal

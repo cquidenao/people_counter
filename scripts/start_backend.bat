@@ -1,43 +1,27 @@
 @echo off
-setlocal enabledelayedexpansion
+setlocal EnableExtensions
 
-REM ============================
-REM People Counter - Start Backend
-REM ============================
-
-REM Root del proyecto (scripts\ -> ..\)
+REM === ROOT del proyecto (carpeta padre de /scripts) ===
 set "ROOT=%~dp0.."
 for %%I in ("%ROOT%") do set "ROOT=%%~fI"
 
-set "LOGDIR=%ROOT%\logs"
-set "VENV=%ROOT%\venv"
-set "PY=%VENV%\Scripts\python.exe"
-
-if not exist "%LOGDIR%" mkdir "%LOGDIR%"
-
-REM Timestamp simple
-for /f "tokens=1-3 delims=/- " %%a in ("%date%") do set "D=%%c%%b%%a"
-for /f "tokens=1-3 delims=:., " %%a in ("%time%") do set "T=%%a%%b%%c"
-set "TS=%D%_%T%"
-
-set "LOG=%LOGDIR%\backend_%TS%.log"
+REM === Logs ===
+if not exist "%ROOT%\logs" mkdir "%ROOT%\logs"
+for /f "tokens=1-3 delims=/: " %%a in ("%date%") do set "D=%%c%%a%%b"
+for /f "tokens=1-3 delims=:. " %%a in ("%time%") do set "T=%%a%%b%%c"
+set "LOG=%ROOT%\logs\backend_%D%_%T%.log"
 
 echo [backend] ROOT=%ROOT%
 echo [backend] LOG=%LOG%
 echo [backend] Starting...
 
-REM Si no existe venv, te avisa
-if not exist "%PY%" (
-  echo [backend] ERROR: No encuentro venv en "%VENV%".
-  echo [backend] Crea el venv en la carpeta del proyecto: python -m venv venv
+REM === VENV ===
+if not exist "%ROOT%\venv\Scripts\python.exe" (
+  echo [backend] ERROR: No existe venv en %ROOT%\venv
+  echo [backend] Crea venv y instala requirements.
   pause
   exit /b 1
 )
 
-pushd "%ROOT%"
-
-REM Inicia uvicorn en este mismo proceso (Task Scheduler lo mantiene vivo)
-"%PY%" -m uvicorn backend.app:app --host 0.0.0.0 --port 8000 --log-level info >> "%LOG%" 2>&1
-
-popd
-endlocal
+REM === Start FastAPI (puerto 8000 local) ===
+"%ROOT%\venv\Scripts\python.exe" -m uvicorn backend.app:app --host 0.0.0.0 --port 8000 --log-level info >> "%LOG%" 2>&1
