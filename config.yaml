@@ -1,0 +1,49 @@
+# ===== Fuente de video =====
+source: "rtsp://admin:elipse2025@192.168.1.108:554/cam/realmonitor?channel=1&subtype=1"
+# ↑ substream (subtype=1) = más estable para OpenCV/YOLO
+
+model: yolov8n.pt
+conf: 0.4
+iou: 0.5
+
+rotate_deg: 0   # prueba 180 si se ve al revés; si queda de lado usa 90 o 270
+
+display:
+  show: true
+  draw_roi: true
+  show_ids: true
+  draw_head: true
+
+backend:
+  url: "http://127.0.0.1:8000"
+  camera_id: "CAM-PC-01"
+
+logic:
+  mode: "line_cross"        # RECOMENDADO
+  cooldown_seconds: 3
+
+
+
+line:
+  pos: 0.5
+  arm_px: 80
+  cross_tol_px: 18
+  min_box_h_px: 110
+  dir_lr: "in"
+  dir_rl: "out"
+
+unique:
+  track_ttl_seconds: 25
+
+
+# Solo si usas mode: roi_exit
+roi_service:
+  x1: 500
+  y1: 80
+  x2: 640
+  y2: 360
+
+
+snapshots:
+  enabled: true
+  dir: "snapshots"

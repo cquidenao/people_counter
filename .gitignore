@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+
+# YOLO / weights
+*.pt
+
+# DB y data local
+people_counter.db
+snapshots/
+
+# Logs
+logs/
+
+# Secrets
+.env
