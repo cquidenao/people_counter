@@ -10,47 +10,47 @@ from backend.config import settings
 
 from fastapi.staticfiles import StaticFiles
 import pathlib
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
+# =========================
+# CORS (desde ENV, con fallback útil)
+# =========================
+ALLOWED_ORIGINS = os.getenv(
+    "ALLOWED_ORIGINS",
+    "http://localhost:8080,"
+    "http://127.0.0.1:8080,"
+    "http://localhost:3000,"
+    "http://127.0.0.1:3000,"
+    "https://people-counter-dashboard.vercel.app",
+).split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "https://people-counter-dashboard.vercel.app",
-    ],
+    allow_origins=[o.strip() for o in ALLOWED_ORIGINS if o.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
 # =========================
-# Config Seguridad (ENV
+# Seguridad (API KEY)
 # =========================
-API_KEY = os.getenv("API_KEY", "")  # define esto en producción
-ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "https://TU-VERCEL.vercel.app").split(",")
+API_KEY = os.getenv("API_KEY", "")  # en prod: define esto sí o sí
 
 def require_api_key(x_api_key: str | None):
-    # Si no defines API_KEY, no valida (útil en dev). En prod, define API_KEY sí o sí.
+    # Si no hay API_KEY, no valida (dev). En prod, pon API_KEY y listo.
     if not API_KEY:
         return
     if x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 # =========================
-# App
+# Static snapshots
 # =========================
-
 SNAP_DIR = os.getenv("SNAPSHOT_DIR", "snapshots")
 pathlib.Path(SNAP_DIR).mkdir(parents=True, exist_ok=True)
-
 app.mount("/snapshots", StaticFiles(directory=SNAP_DIR), name="snapshots")
-
-
 
 @app.on_event("startup")
 def _startup():
