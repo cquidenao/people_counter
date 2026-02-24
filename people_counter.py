@@ -38,29 +38,44 @@ def clamp(v, a, b):
 
 
 def save_person_snapshot(frame_bgr, bbox_xyxy, out_dir, prefix="count"):
-    os.makedirs(out_dir, exist_ok=True)
+    try:
+        os.makedirs(out_dir, exist_ok=True)
 
-    h, w = frame_bgr.shape[:2]
-    x1, y1, x2, y2 = bbox_xyxy
+        h, w = frame_bgr.shape[:2]
+        x1, y1, x2, y2 = bbox_xyxy
 
-    bw, bh = (x2 - x1), (y2 - y1)
-    mx, my = int(0.15 * bw), int(0.15 * bh)
+        bw, bh = (x2 - x1), (y2 - y1)
+        mx, my = int(0.15 * bw), int(0.15 * bh)
 
-    cx1 = clamp(int(x1 - mx), 0, w - 1)
-    cy1 = clamp(int(y1 - my), 0, h - 1)
-    cx2 = clamp(int(x2 + mx), 0, w - 1)
-    cy2 = clamp(int(y2 + my), 0, h - 1)
+        cx1 = clamp(int(x1 - mx), 0, w - 1)
+        cy1 = clamp(int(y1 - my), 0, h - 1)
+        cx2 = clamp(int(x2 + mx), 0, w - 1)
+        cy2 = clamp(int(y2 + my), 0, h - 1)
 
-    crop = frame_bgr[cy1:cy2, cx1:cx2]
-    if crop.size == 0:
+        crop = frame_bgr[cy1:cy2, cx1:cx2]
+
+        if crop is None or crop.size == 0:
+            print("⚠ Crop vacío, no se guarda snapshot")
+            return None
+
+        ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
+        filename = f"{prefix}_{ts}.jpg"
+        path = os.path.abspath(os.path.join(out_dir, filename))
+
+        print("📸 Intentando guardar en:", path)
+
+        ok = cv2.imwrite(path, crop, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
+
+        if ok:
+            print("✅ Snapshot guardado correctamente")
+            return filename
+        else:
+            print("❌ cv2.imwrite devolvió False")
+            return None
+
+    except Exception as e:
+        print("💥 Error guardando snapshot:", e)
         return None
-
-    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
-    filename = f"{prefix}_{ts}.jpg"
-    path = os.path.join(out_dir, filename)
-
-    ok = cv2.imwrite(path, crop, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
-    return filename if ok else None
 
 
 def rotate_frame(frame, rot):

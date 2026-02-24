@@ -1,38 +1,24 @@
-# ===== Fuente de video =====
-source: "rtsp://admin:elipse2025@192.168.1.108:554/cam/realmonitor?channel=1&subtype=1"
-# ↑ substream (subtype=1) = más estable para OpenCV/YOLO
+source: "rtsp://admin:elipse2025@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0"
 
 model: yolov8n.pt
 conf: 0.4
 iou: 0.5
-
-rotate_deg: 0   # prueba 180 si se ve al revés; si queda de lado usa 90 o 270
+rotate_deg: 0
 
 display:
   show: true
-  draw_roi: true
   show_ids: true
   draw_head: true
+  draw_line: true
 
 snapshots:
   enabled: true
-  dir: "C:/people_counter/snapshots"   # <- ABSOLUTA (clave)
+  dir: "C:/people_counter/snapshots"
 
 backend:
-  url: "https://people-counter-y9mn.onrender.com"   # <- TU RENDER
+  backend:
+  url: "http://127.0.0.1:8000"
   camera_id: "CAM-PC-01"
-
-display:
-  show: false        # producción: sin ventana
-  show_ids: false
-  draw_head: false
-  draw_line: false
-
-logic:
-  mode: "line_cross"        # RECOMENDADO
-  cooldown_seconds: 3
-
-
 
 line:
   pos: 0.5
@@ -44,14 +30,3 @@ line:
 
 unique:
   track_ttl_seconds: 25
-
-
-# Solo si usas mode: roi_exit
-roi_service:
-  x1: 500
-  y1: 80
-  x2: 640
-  y2: 360
-
-
-
