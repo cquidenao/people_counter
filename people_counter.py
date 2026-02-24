@@ -98,7 +98,7 @@ def transform_bbox_xyxy(x1, y1, x2, y2, w, h, rot):
 def main():
     cfg = load_cfg()
 
-    source = cfg.get("source", 0)
+    source = cfg.get("source", 0)  # 0 o RTSP string
     model_path = cfg.get("model", "yolov8n.pt")
     conf = float(cfg.get("conf", 0.4))
     iou = float(cfg.get("iou", 0.5))
@@ -125,20 +125,30 @@ def main():
     min_box_h = int(line.get("min_box_h_px", 110))
 
     # Direcciones
-    dir_lr = line.get("dir_lr", "in")   # izquierda -> derecha
-    dir_rl = line.get("dir_rl", "out")  # derecha -> izquierda
+    dir_lr = line.get("dir_lr", "in")    # izquierda -> derecha
+    dir_rl = line.get("dir_rl", "out")   # derecha -> izquierda
 
     unique = cfg.get("unique", {})
     TRACK_TTL_SECONDS = float(unique.get("track_ttl_seconds", 25.0))
 
+    # ====== Modelo + captura OpenCV (esto garantiza ventana) ======
     model = YOLO(model_path)
+
+    cap = cv2.VideoCapture(source)
+    if not cap.isOpened():
+        raise RuntimeError("No se pudo abrir la cámara (SOURCE/RTSP/credenciales/red).")
+
+    window_name = "people_counter (unique once)"
+    if show:
+        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(window_name, 1100, 750)
 
     total_in = 0
     total_out = 0
 
     # tracking state
-    armed = {}        # tid -> "L" o "R"
-    last_seen_ts = {} # tid -> last seen
+    armed = {}         # tid -> "L" o "R"
+    last_seen_ts = {}  # tid -> last seen
 
     # Manejo de reutilización de IDs (epoch por tid)
     tid_epoch = {}      # tid -> epoch int
@@ -149,31 +159,38 @@ def main():
     next_person_id = 1
     key_to_person = {}  # (tid, epoch) -> person_id
 
-    stream = model.track(
-        source=source,
-        conf=conf,
-        iou=iou,
-        classes=[0],
-        persist=True,
-        tracker="bytetrack.yaml",
-        stream=True,
-        verbose=False,
-    )
-
     last_cleanup = time.time()
 
-    for res in stream:
+    while True:
         now = time.time()
 
-        frame0 = res.orig_img
-        if frame0 is None:
+        ret, frame0 = cap.read()
+        if not ret or frame0 is None:
+            print("No se pudo leer frame. Reintentando...")
+            time.sleep(0.5)
             continue
 
         h0, w0 = frame0.shape[:2]
 
+        # Rotación para visualizar y para conteo (coherente)
+        frame = rotate_frame(frame0, rotate_deg)
+        hr, wr = frame.shape[:2]
+        LINE_X = int(wr * line_pos)
+
+        # Detect + Track por frame
+        res = model.track(
+            frame0,  # IMPORTANT: tracking sobre frame original; bbox se transforma si hay rotación
+            conf=conf,
+            iou=iou,
+            classes=[0],
+            persist=True,
+            tracker="bytetrack.yaml",
+            verbose=False,
+        )[0]
+
         boxes = res.boxes
         if boxes is None or boxes.xyxy is None or boxes.id is None or len(boxes.xyxy) == 0:
-            # limpieza de “muertos”
+            # Limpieza de “muertos”
             if (now - last_cleanup) > 1.0:
                 dead = [tid for tid, ts in last_seen_ts.items() if (now - ts) > TRACK_TTL_SECONDS]
                 for tid in dead:
@@ -181,17 +198,23 @@ def main():
                     armed.pop(tid, None)
                     tid_last_gone[tid] = now
                 last_cleanup = now
+
+            # Igual mostramos pantalla aunque no haya detecciones
+            if show:
+                if draw_line:
+                    cv2.line(frame, (LINE_X, 0), (LINE_X, hr), (0, 255, 0), 2)
+                cv2.putText(frame, f"IN: {total_in}  OUT: {total_out}",
+                            (20, 55), cv2.FONT_HERSHEY_SIMPLEX, 1.1, (255, 255, 255), 3)
+                cv2.imshow(window_name, frame)
+                if cv2.waitKey(1) & 0xFF == 27:
+                    break
             continue
 
         xyxy = boxes.xyxy.cpu().numpy()
         ids = boxes.id.cpu().numpy().astype(int)
 
-        frame = rotate_frame(frame0, rotate_deg)
-        hr, wr = frame.shape[:2]
-        LINE_X = int(wr * line_pos)
-
         for (x1, y1, x2, y2), tid in zip(xyxy, ids):
-            # bbox rotado
+            # bbox rotado para dibujar/contar en el frame mostrado
             if rotate_deg != 0:
                 rx1, ry1, rx2, ry2 = transform_bbox_xyxy(x1, y1, x2, y2, w0, h0, rotate_deg)
             else:
@@ -217,11 +240,11 @@ def main():
             hx, hy = head_point(rx1, ry1, rx2, ry2)
             dx = hx - LINE_X
 
-            # auto-arming si aún no está armado
+            # auto-arming
             if tid not in armed and abs(dx) > cross_tol:
                 armed[tid] = "L" if dx < 0 else "R"
 
-            # armado normal
+            # armado normal (histéresis)
             if dx <= -arm_px:
                 armed[tid] = "L"
             elif dx >= arm_px:
@@ -251,7 +274,7 @@ def main():
                         snapshot_filename = None
                         if snapshot_on:
                             snapshot_filename = save_person_snapshot(
-                                frame,
+                                frame,  # frame rotado para que snapshot coincida con lo que ves
                                 (rx1, ry1, rx2, ry2),
                                 snapshot_dir,
                                 prefix=f"{camera_id}_{direction}",
@@ -317,7 +340,7 @@ def main():
                 3,
             )
 
-            cv2.imshow("people_counter (unique once)", frame)
+            cv2.imshow(window_name, frame)
             if cv2.waitKey(1) & 0xFF == 27:
                 break
 
@@ -330,6 +353,7 @@ def main():
                 tid_last_gone[tid] = now
             last_cleanup = now
 
+    cap.release()
     cv2.destroyAllWindows()
 
 
