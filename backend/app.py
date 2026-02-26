@@ -11,6 +11,7 @@ from backend.config import settings
 from fastapi.staticfiles import StaticFiles
 import pathlib
 
+
 app = FastAPI()
 
 # =========================
@@ -48,9 +49,10 @@ def require_api_key(x_api_key: str | None):
 # =========================
 # Static snapshots
 # =========================
-SNAP_DIR = os.getenv("SNAPSHOT_DIR", "snapshots")
-pathlib.Path(SNAP_DIR).mkdir(parents=True, exist_ok=True)
-app.mount("/snapshots", StaticFiles(directory=SNAP_DIR), name="snapshots")
+SNAP_DIR = pathlib.Path(os.getenv("SNAPSHOT_DIR", r"C:\people_counter\snapshots"))
+SNAP_DIR.mkdir(parents=True, exist_ok=True)
+
+app.mount("/snapshots", StaticFiles(directory=str(SNAP_DIR)), name="snapshots")
 
 @app.on_event("startup")
 def _startup():

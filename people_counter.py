@@ -6,11 +6,18 @@ from ultralytics import YOLO
 import os
 from datetime import datetime
 
+import json
+from pathlib import Path
+
+
+# -------------------- CONFIG --------------------
 
 def load_cfg(path="config.yaml"):
     with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
+
+# -------------------- TU BACKEND LOCAL (opcional) --------------------
 
 def post_event(base_url, camera_id, track_id, direction="unknown", count_delta=1, meta=None, timeout=1.5):
     payload = {
@@ -27,15 +34,116 @@ def post_event(base_url, camera_id, track_id, direction="unknown", count_delta=1
         return False
 
 
+# ===================== UNUS (Cliente final) =====================
+
+UNUS_STATE_FILE = Path("unus_state.json")
+UNUS_PENDING_FILE = Path("unus_pending.json")
+
+def _unus_today_key(dt=None):
+    dt = dt or datetime.now()
+    return dt.strftime("%Y-%m-%d")
+
+def _unus_fmt_ts(dt=None):
+    dt = dt or datetime.now()
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+def _json_load(path: Path):
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+def _json_save(path: Path, obj):
+    path.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+
+def unus_increment_and_get_total(casi_cod: str) -> int:
+    """
+    Incrementa el acumulado del día para este NUC (CASI_COD) y devuelve el total.
+    """
+    state = _json_load(UNUS_STATE_FILE)
+    day = _unus_today_key()
+
+    state.setdefault(day, {})
+    state[day].setdefault(casi_cod, 0)
+    state[day][casi_cod] += 1
+
+    _json_save(UNUS_STATE_FILE, state)
+    return int(state[day][casi_cod])
+
+def unus_queue_pending(payload: dict):
+    """
+    Guarda payload fallido para reintento posterior.
+    """
+    pend = _json_load(UNUS_PENDING_FILE)
+    if not isinstance(pend, list):
+        pend = []
+    pend.append(payload)
+    _json_save(UNUS_PENDING_FILE, pend)
+
+def unus_flush_pending(cfg_unus: dict, max_send: int = 50):
+    """
+    Reintenta enviar pendientes (si hay internet).
+    """
+    pend = _json_load(UNUS_PENDING_FILE)
+    if not isinstance(pend, list) or len(pend) == 0:
+        return
+
+    url = cfg_unus["base_url"].rstrip("/") + "/recibeMovimientosDeaUno_V6"
+    timeout = float(cfg_unus.get("timeout", 15))
+
+    sent = 0
+    remaining = []
+    for payload in pend:
+        if sent >= max_send:
+            remaining.append(payload)
+            continue
+        try:
+            r = requests.post(url, data=payload, timeout=timeout)
+            r.raise_for_status()
+            sent += 1
+        except Exception:
+            remaining.append(payload)
+
+    _json_save(UNUS_PENDING_FILE, remaining)
+    if sent > 0:
+        print(f"🟢 UNUS: reenviados pendientes = {sent}, quedan = {len(remaining)}")
+
+def post_unus_acumulado(cfg_unus: dict, total_hoy: int, fecha_hora: str):
+    """
+    Envía al WS (form-urlencoded). Si falla, lo deja pendiente.
+    """
+    url = cfg_unus["base_url"].rstrip("/") + "/recibeMovimientosDeaUno_V6"
+    timeout = float(cfg_unus.get("timeout", 15))
+
+    payload = {
+        "BASE_DATOS_CLIENTE": cfg_unus["base_datos_cliente"],
+        "CASI_COD": str(cfg_unus["casi_cod"]),    # ID del NUC
+        "LECT_COD": str(cfg_unus["lect_cod"]),
+        "FECHA_HORA": fecha_hora,                # timestamp del cruce
+        "pass": str(total_hoy),                   # acumulado del día
+    }
+
+    try:
+        r = requests.post(url, data=payload, timeout=timeout)
+        r.raise_for_status()
+        return True
+    except Exception as e:
+        print("⚠ UNUS: fallo envío, lo dejo en cola:", e)
+        unus_queue_pending(payload)
+        return False
+
+
+# -------------------- GEOMETRÍA / UTILIDADES --------------------
+
 def head_point(x1, y1, x2, y2):
     cx = (x1 + x2) / 2.0
     hy = y1 + 0.15 * (y2 - y1)
     return cx, hy
 
-
 def clamp(v, a, b):
     return max(a, min(b, v))
-
 
 def save_person_snapshot(frame_bgr, bbox_xyxy, out_dir, prefix="count"):
     try:
@@ -62,21 +170,12 @@ def save_person_snapshot(frame_bgr, bbox_xyxy, out_dir, prefix="count"):
         filename = f"{prefix}_{ts}.jpg"
         path = os.path.abspath(os.path.join(out_dir, filename))
 
-        print("📸 Intentando guardar en:", path)
-
         ok = cv2.imwrite(path, crop, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
-
-        if ok:
-            print("✅ Snapshot guardado correctamente")
-            return filename
-        else:
-            print("❌ cv2.imwrite devolvió False")
-            return None
+        return filename if ok else None
 
     except Exception as e:
         print("💥 Error guardando snapshot:", e)
         return None
-
 
 def rotate_frame(frame, rot):
     if rot == 0:
@@ -89,7 +188,6 @@ def rotate_frame(frame, rot):
         return cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
     raise ValueError("rotate_deg must be one of: 0, 90, 180, 270")
 
-
 def transform_point(x, y, w, h, rot):
     if rot == 0:
         return x, y
@@ -101,7 +199,6 @@ def transform_point(x, y, w, h, rot):
         return y, (w - 1 - x)
     raise ValueError("rotate_deg must be one of: 0, 90, 180, 270")
 
-
 def transform_bbox_xyxy(x1, y1, x2, y2, w, h, rot):
     corners = [(x1, y1), (x2, y1), (x2, y2), (x1, y2)]
     tc = [transform_point(x, y, w, h, rot) for x, y in corners]
@@ -110,10 +207,15 @@ def transform_bbox_xyxy(x1, y1, x2, y2, w, h, rot):
     return min(xs), min(ys), max(xs), max(ys)
 
 
+# -------------------- MAIN --------------------
+
 def main():
     cfg = load_cfg()
 
-    source = cfg.get("source", 0)  # 0 o RTSP string
+    unus_cfg = cfg.get("unus", {})
+    unus_enabled = bool(unus_cfg.get("enabled", False))
+
+    source = cfg.get("source", 0)
     model_path = cfg.get("model", "yolov8n.pt")
     conf = float(cfg.get("conf", 0.4))
     iou = float(cfg.get("iou", 0.5))
@@ -139,14 +241,12 @@ def main():
     cross_tol = int(line.get("cross_tol_px", 18))
     min_box_h = int(line.get("min_box_h_px", 110))
 
-    # Direcciones
-    dir_lr = line.get("dir_lr", "in")    # izquierda -> derecha
-    dir_rl = line.get("dir_rl", "out")   # derecha -> izquierda
+    dir_lr = line.get("dir_lr", "in")
+    dir_rl = line.get("dir_rl", "out")
 
     unique = cfg.get("unique", {})
     TRACK_TTL_SECONDS = float(unique.get("track_ttl_seconds", 25.0))
 
-    # ====== Modelo + captura OpenCV (esto garantiza ventana) ======
     model = YOLO(model_path)
 
     cap = cv2.VideoCapture(source)
@@ -161,23 +261,26 @@ def main():
     total_in = 0
     total_out = 0
 
-    # tracking state
-    armed = {}         # tid -> "L" o "R"
-    last_seen_ts = {}  # tid -> last seen
+    armed = {}
+    last_seen_ts = {}
 
-    # Manejo de reutilización de IDs (epoch por tid)
-    tid_epoch = {}      # tid -> epoch int
-    tid_last_gone = {}  # tid -> ts cuando “murió”
-    counted = set()     # set of (tid, epoch) ya contados
+    tid_epoch = {}
+    tid_last_gone = {}
+    counted = set()
 
-    # Person IDs propios (solo para mostrar)
     next_person_id = 1
-    key_to_person = {}  # (tid, epoch) -> person_id
+    key_to_person = {}
 
     last_cleanup = time.time()
+    last_pending_flush = time.time()
 
     while True:
         now = time.time()
+
+        # Reintenta pendientes cada 30s (si está habilitado UNUS)
+        if unus_enabled and (now - last_pending_flush) > 30:
+            unus_flush_pending(unus_cfg, max_send=50)
+            last_pending_flush = now
 
         ret, frame0 = cap.read()
         if not ret or frame0 is None:
@@ -187,14 +290,12 @@ def main():
 
         h0, w0 = frame0.shape[:2]
 
-        # Rotación para visualizar y para conteo (coherente)
         frame = rotate_frame(frame0, rotate_deg)
         hr, wr = frame.shape[:2]
         LINE_X = int(wr * line_pos)
 
-        # Detect + Track por frame
         res = model.track(
-            frame0,  # IMPORTANT: tracking sobre frame original; bbox se transforma si hay rotación
+            frame0,
             conf=conf,
             iou=iou,
             classes=[0],
@@ -205,7 +306,6 @@ def main():
 
         boxes = res.boxes
         if boxes is None or boxes.xyxy is None or boxes.id is None or len(boxes.xyxy) == 0:
-            # Limpieza de “muertos”
             if (now - last_cleanup) > 1.0:
                 dead = [tid for tid, ts in last_seen_ts.items() if (now - ts) > TRACK_TTL_SECONDS]
                 for tid in dead:
@@ -214,7 +314,6 @@ def main():
                     tid_last_gone[tid] = now
                 last_cleanup = now
 
-            # Igual mostramos pantalla aunque no haya detecciones
             if show:
                 if draw_line:
                     cv2.line(frame, (LINE_X, 0), (LINE_X, hr), (0, 255, 0), 2)
@@ -229,7 +328,6 @@ def main():
         ids = boxes.id.cpu().numpy().astype(int)
 
         for (x1, y1, x2, y2), tid in zip(xyxy, ids):
-            # bbox rotado para dibujar/contar en el frame mostrado
             if rotate_deg != 0:
                 rx1, ry1, rx2, ry2 = transform_bbox_xyxy(x1, y1, x2, y2, w0, h0, rotate_deg)
             else:
@@ -241,7 +339,6 @@ def main():
 
             last_seen_ts[tid] = now
 
-            # epoch: si el tid “murió” y reapareció, sube epoch
             if tid not in tid_epoch:
                 tid_epoch[tid] = 0
             if tid in tid_last_gone and (now - tid_last_gone[tid]) > TRACK_TTL_SECONDS:
@@ -255,24 +352,20 @@ def main():
             hx, hy = head_point(rx1, ry1, rx2, ry2)
             dx = hx - LINE_X
 
-            # auto-arming
             if tid not in armed and abs(dx) > cross_tol:
                 armed[tid] = "L" if dx < 0 else "R"
 
-            # armado normal (histéresis)
             if dx <= -arm_px:
                 armed[tid] = "L"
             elif dx >= arm_px:
                 armed[tid] = "R"
 
-            # Cruce
             if abs(dx) <= cross_tol:
                 a = armed.get(tid)
                 if a is not None:
                     if key not in counted:
                         counted.add(key)
 
-                        # person_id
                         if key not in key_to_person:
                             key_to_person[key] = next_person_id
                             next_person_id += 1
@@ -285,16 +378,21 @@ def main():
                             direction = dir_rl
                             total_out += 1
 
-                        # 📸 Snapshot SOLO al contar
+                        # ✅ AQUÍ se envía a UNUS (ACUMULADO)
+                        if unus_enabled:
+                            total_hoy = unus_increment_and_get_total(str(unus_cfg["casi_cod"]))
+                            post_unus_acumulado(unus_cfg, total_hoy, fecha_hora=_unus_fmt_ts())
+
                         snapshot_filename = None
                         if snapshot_on:
                             snapshot_filename = save_person_snapshot(
-                                frame,  # frame rotado para que snapshot coincida con lo que ves
+                                frame,
                                 (rx1, ry1, rx2, ry2),
                                 snapshot_dir,
                                 prefix=f"{camera_id}_{direction}",
                             )
 
+                        # (si aún quieres enviar a tu backend local)
                         post_event(
                             backend_url,
                             camera_id,
@@ -309,10 +407,8 @@ def main():
                             },
                         )
 
-                    # desarma para evitar jitter
                     armed.pop(tid, None)
 
-            # Draw
             if show:
                 cv2.rectangle(frame, (int(rx1), int(ry1)), (int(rx2), int(ry2)), (0, 255, 255), 2)
                 if show_ids:
@@ -359,7 +455,6 @@ def main():
             if cv2.waitKey(1) & 0xFF == 27:
                 break
 
-        # Limpieza de “muertos”
         if (now - last_cleanup) > 1.0:
             dead = [tid for tid, ts in last_seen_ts.items() if (now - ts) > TRACK_TTL_SECONDS]
             for tid in dead:

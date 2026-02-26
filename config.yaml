@@ -16,7 +16,6 @@ snapshots:
   dir: "C:/people_counter/snapshots"
 
 backend:
-  backend:
   url: "http://127.0.0.1:8000"
   camera_id: "CAM-PC-01"
 
@@ -30,3 +29,13 @@ line:
 
 unique:
   track_ttl_seconds: 25
+  
+sqlite_path: "people_counter.db"
+
+unus:
+  base_url: "https://unus.cl/WS_RECIBE_MOVIMIENTOS/wsRecibeMovimientos.asmx"
+  base_datos_cliente: "CASI_COEXPAN"
+  casi_cod: "001"
+  lect_cod: "A"
+  pass: "M1"
+  timeout: 15

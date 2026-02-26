@@ -9,6 +9,8 @@ def get_conn():
 def init_db():
     conn = get_conn()
     cur = conn.cursor()
+
+    # Tabla principal
     cur.execute("""
     CREATE TABLE IF NOT EXISTS events (
         id TEXT PRIMARY KEY,
@@ -16,8 +18,21 @@ def init_db():
         camera_id TEXT,
         direction TEXT,
         count_delta INTEGER NOT NULL,
-        meta_json TEXT
+        meta_json TEXT,
+        sent_ok INTEGER NOT NULL DEFAULT 0,
+        sent_at TEXT
     )
     """)
+
+    # 🔹 En caso de que la tabla ya exista (producción),
+    # aseguramos que las columnas nuevas existan
+    cols = {row[1] for row in cur.execute("PRAGMA table_info(events)")}
+
+    if "sent_ok" not in cols:
+        cur.execute("ALTER TABLE events ADD COLUMN sent_ok INTEGER NOT NULL DEFAULT 0")
+
+    if "sent_at" not in cols:
+        cur.execute("ALTER TABLE events ADD COLUMN sent_at TEXT")
+
     conn.commit()
     conn.close()
